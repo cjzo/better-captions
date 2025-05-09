@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; width: 200px; padding: 10px; }
+    .row { margin-bottom: 10px; }
+    label { display: block; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <div class="row">
+    <label><input type="checkbox" id="toggle"> Enable Captions</label>
+  </div>
+  <div class="row">
+    <label for="lang">Language</label>
+    <select id="lang">
+      <option value="en">English</option>
+      <option value="es">Spanish</option>
+      <option value="auto">Auto</option>
+    </select>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

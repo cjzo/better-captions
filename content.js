@@ -4,6 +4,7 @@ console.log("[Better Captions] Extension loaded");
 // Extension state
 const state = {
   enabled: true,  // Default to enabled
+  language: 'en', // Default language
   captionsActive: false,
   activeIntervalId: null,
   captionUpdateIntervalId: null,
@@ -86,14 +87,36 @@ function getCaptionTrackUrl(playerData) {
     
     console.log("[Better Captions] Found caption tracks:", tracks.length);
     
-    // Try to find English track first
-    const en = tracks.find(t => 
-      t.languageCode === "en" || 
-      t.languageCode === "en-US" || 
-      t.languageCode === "en-GB"
-    );
+    // First check if we should use the user-selected language
+    let selectedTrack = null;
     
-    const selectedTrack = en || tracks[0];
+    if (state.language !== 'auto') {
+      // Look for exact match first
+      selectedTrack = tracks.find(t => t.languageCode === state.language);
+      
+      // Then look for partial matches (like "en-US" for "en")
+      if (!selectedTrack) {
+        selectedTrack = tracks.find(t => t.languageCode.startsWith(state.language + '-'));
+      }
+    }
+    
+    // Fallback to English or first available track
+    if (!selectedTrack) {
+      // Try to find English track if not specifically looking for another language
+      if (state.language === 'en' || state.language === 'auto') {
+        selectedTrack = tracks.find(t => 
+          t.languageCode === "en" || 
+          t.languageCode === "en-US" || 
+          t.languageCode === "en-GB"
+        );
+      }
+      
+      // If still no track found, use the first available
+      if (!selectedTrack) {
+        selectedTrack = tracks[0];
+      }
+    }
+    
     console.log("[Better Captions] Selected track:", selectedTrack.languageCode);
     
     // YouTube sometimes uses a proxy URL that requires additional params
@@ -304,12 +327,8 @@ function createToggleButton() {
       captionBox.style.display = state.enabled ? 'block' : 'none';
     }
     
-    // Save preference to localStorage
-    try {
-      localStorage.setItem('betterCaptions_enabled', state.enabled ? 'true' : 'false');
-    } catch (e) {
-      console.error("[Better Captions] Failed to save setting:", e);
-    }
+    // Save preference to Chrome storage
+    chrome.storage.sync.set({ enabled: state.enabled });
   });
   
   document.body.appendChild(button);
@@ -407,21 +426,51 @@ function setupNavigationObserver() {
 function initialize() {
   console.log("[Better Captions] Initializing extension...");
   
-  // Load user preference from localStorage
-  try {
-    const savedPreference = localStorage.getItem('betterCaptions_enabled');
-    if (savedPreference !== null) {
-      state.enabled = savedPreference === 'true';
-      console.log("[Better Captions] Loaded saved preference:", state.enabled);
+  // Load user preferences from Chrome storage
+  chrome.storage.sync.get({ enabled: true, language: 'en' }, prefs => {
+    state.enabled = prefs.enabled;
+    state.language = prefs.language;
+    console.log("[Better Captions] Loaded preferences:", prefs);
+    
+    setupNavigationObserver();
+    
+    // Initial run after a delay to ensure YouTube is ready
+    setTimeout(runCaptionSync, 2000);
+  });
+  
+  // Listen for changes from popup
+  chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace !== 'sync') return;
+    
+    let needsRestart = false;
+    
+    if (changes.enabled && changes.enabled.newValue !== undefined) {
+      state.enabled = changes.enabled.newValue;
+      
+      // Update button if it exists
+      const button = document.getElementById('better-captions-toggle');
+      if (button) {
+        button.textContent = state.enabled ? 'Captions: ON' : 'Captions: OFF';
+        button.style.backgroundColor = state.enabled ? '#FFD700' : '#999';
+      }
+      
+      // Update caption box visibility
+      const box = document.getElementById('custom-caption-box');
+      if (box) {
+        box.style.display = state.enabled ? 'block' : 'none';
+      }
     }
-  } catch (e) {
-    console.error("[Better Captions] Failed to load setting:", e);
-  }
-  
-  setupNavigationObserver();
-  
-  // Initial run after a delay to ensure YouTube is ready
-  setTimeout(runCaptionSync, 2000);
+    
+    if (changes.language && changes.language.newValue !== undefined) {
+      state.language = changes.language.newValue;
+      needsRestart = true;
+    }
+    
+    // If language changed, we need to restart to get new captions
+    if (needsRestart && state.enabled) {
+      runCaptionSync();
+    }
+  });
 }
 
 // If the page is still loading, wait for it to finish

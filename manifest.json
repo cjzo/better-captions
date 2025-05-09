@@ -1,10 +1,13 @@
 {
     "manifest_version": 3,
     "name": "Better YouTube Captions",
-    "version": "1.0",
-    "description": "Custom captions for YouTube with better syncing. Please work",
-    "permissions": [],
+    "version": "1.1",
+    "description": "Custom captions for YouTube with better syncing and toolbar controls.",
+    "permissions": ["storage"],
     "host_permissions": ["https://www.youtube.com/*"],
+    "action": {
+      "default_popup": "popup.html"
+    },
     "content_scripts": [
       {
         "matches": ["https://www.youtube.com/*"],
