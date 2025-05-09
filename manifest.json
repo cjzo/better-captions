@@ -6,7 +6,8 @@
     "permissions": ["storage"],
     "host_permissions": ["https://www.youtube.com/*"],
     "action": {
-      "default_popup": "popup.html"
+      "default_popup": "popup.html",
+      "default_icon": "icons/icon128.png"
     },
     "content_scripts": [
       {
@@ -15,6 +16,9 @@
         "css": ["styles.css"],
         "run_at": "document_idle"
       }
-    ]
+    ],
+    "icons": {
+        "128": "icons/icon128.png"
+    }
   }
   

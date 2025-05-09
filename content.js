@@ -3,12 +3,15 @@ console.log("[Better Captions] Extension loaded");
 
 // Extension state
 const state = {
-  enabled: true,  // Default to enabled
-  language: 'en', // Default language
+  enabled: true,       // Default to enabled
+  language: 'en',      // Default language
+  hideButton: false,   // Default to showing the button
+  forceRefresh: true,  // Default to force refresh on new videos
   captionsActive: false,
   activeIntervalId: null,
   captionUpdateIntervalId: null,
-  navigationObserver: null
+  navigationObserver: null,
+  currentVideoId: null
 };
 
 // Wait for player to be ready
@@ -283,6 +286,11 @@ function createToggleButton() {
     existingButton.remove();
   }
   
+  // If button is set to be hidden, don't create it
+  if (state.hideButton) {
+    return null;
+  }
+  
   // Create new button
   const button = document.createElement('button');
   button.id = 'better-captions-toggle';
@@ -394,6 +402,48 @@ async function runCaptionSync() {
   }
 }
 
+// Extract video ID from YouTube URL
+function getYoutubeVideoId(url) {
+  const urlObj = new URL(url);
+  
+  // Handle regular watch URLs
+  if (urlObj.pathname === '/watch') {
+    return urlObj.searchParams.get('v');
+  }
+  
+  // Handle short URLs like /shorts/videoId
+  if (urlObj.pathname.startsWith('/shorts/')) {
+    return urlObj.pathname.split('/')[2];
+  }
+  
+  // Handle embedded URLs
+  if (urlObj.pathname.startsWith('/embed/')) {
+    return urlObj.pathname.split('/')[2];
+  }
+  
+  return null;
+}
+
+// Clear all caption system state
+function clearCaptionSystem() {
+  // Clear intervals
+  if (state.captionUpdateIntervalId) {
+    clearInterval(state.captionUpdateIntervalId);
+    state.captionUpdateIntervalId = null;
+  }
+  
+  if (state.activeIntervalId) {
+    clearInterval(state.activeIntervalId);
+    state.activeIntervalId = null;
+  }
+  
+  // Reset caption box
+  const box = document.getElementById('custom-caption-box');
+  if (box) box.innerText = "";
+  
+  state.captionsActive = false;
+}
+
 // Track YouTube URL changes (for SPA navigation)
 let lastUrl = location.href;
 
@@ -405,11 +455,21 @@ function setupNavigationObserver() {
   state.navigationObserver = new MutationObserver((mutations) => {
     if (location.href !== lastUrl) {
       console.log("[Better Captions] URL changed from", lastUrl, "to", location.href);
+      
+      const oldVideoId = state.currentVideoId;
+      const newVideoId = getYoutubeVideoId(location.href);
+      state.currentVideoId = newVideoId;
+      
       lastUrl = location.href;
       
-      // Reset caption box
-      const box = document.getElementById('custom-caption-box');
-      if (box) box.innerText = "";
+      clearCaptionSystem();
+      
+      // If video ID changed and force refresh is enabled, reload the page
+      if (state.forceRefresh && oldVideoId && newVideoId && oldVideoId !== newVideoId) {
+        console.log("[Better Captions] Forcing page refresh for new video");
+        window.location.reload();
+        return;
+      }
       
       // Wait a bit for the new page to load
       setTimeout(runCaptionSync, 1500);
@@ -420,6 +480,9 @@ function setupNavigationObserver() {
     childList: true, 
     subtree: true 
   });
+  
+  // Set initial video ID
+  state.currentVideoId = getYoutubeVideoId(location.href);
 }
 
 // Initialize after DOM is fully loaded
@@ -427,16 +490,26 @@ function initialize() {
   console.log("[Better Captions] Initializing extension...");
   
   // Load user preferences from Chrome storage
-  chrome.storage.sync.get({ enabled: true, language: 'en' }, prefs => {
-    state.enabled = prefs.enabled;
-    state.language = prefs.language;
-    console.log("[Better Captions] Loaded preferences:", prefs);
-    
-    setupNavigationObserver();
-    
-    // Initial run after a delay to ensure YouTube is ready
-    setTimeout(runCaptionSync, 2000);
-  });
+  chrome.storage.sync.get(
+    { 
+      enabled: true, 
+      language: 'en',
+      hideButton: false,
+      forceRefresh: true
+    }, 
+    prefs => {
+      state.enabled = prefs.enabled;
+      state.language = prefs.language;
+      state.hideButton = prefs.hideButton;
+      state.forceRefresh = prefs.forceRefresh;
+      console.log("[Better Captions] Loaded preferences:", prefs);
+      
+      setupNavigationObserver();
+      
+      // Initial run after a delay to ensure YouTube is ready
+      setTimeout(runCaptionSync, 2000);
+    }
+  );
   
   // Listen for changes from popup
   chrome.storage.onChanged.addListener((changes, namespace) => {
@@ -464,6 +537,25 @@ function initialize() {
     if (changes.language && changes.language.newValue !== undefined) {
       state.language = changes.language.newValue;
       needsRestart = true;
+    }
+    
+    if (changes.hideButton && changes.hideButton.newValue !== undefined) {
+      state.hideButton = changes.hideButton.newValue;
+      
+      // Handle button visibility
+      const existingButton = document.getElementById('better-captions-toggle');
+      if (existingButton) {
+        if (state.hideButton) {
+          existingButton.remove();
+        }
+      } else if (!state.hideButton) {
+        // Create button if it doesn't exist and should be shown
+        createToggleButton();
+      }
+    }
+    
+    if (changes.forceRefresh && changes.forceRefresh.newValue !== undefined) {
+      state.forceRefresh = changes.forceRefresh.newValue;
     }
     
     // If language changed, we need to restart to get new captions
