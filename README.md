@@ -18,14 +18,6 @@ A Chrome extension that overlays improved, high-visibility subtitles on YouTube 
 4. Click **Load unpacked** and select the folder containing this extension's files.
 5. Visit a YouTube video page. Captions will appear automatically if available.
 
-## File Structure
-
-better-youtube-captions/
-├── manifest.json # Chrome extension config
-├── content.js # Main logic to fetch and render captions
-├── styles.css # Styling for the caption overlay
-└── README.md # This file
-
 
 ## Customization
 
