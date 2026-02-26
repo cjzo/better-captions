@@ -1,47 +1,66 @@
 #custom-caption-box {
-    position: fixed;
-    bottom: 10%;
-    left: 50%;
-    transform: translateX(-50%);
-    max-width: 90%;
-    text-align: center;
-    font-size: 28px;
-    color: #FFD700;
-    text-shadow:
-      -1px -1px 0 #000,
-       1px -1px 0 #000,
-      -1px  1px 0 #000,
-       1px  1px 0 #000;
-    z-index: 999999;
-    pointer-events: none;
-    font-family: Arial, sans-serif;
-    white-space: normal;
-    word-wrap: break-word;
-    background-color: transparent;
-  }
+  position: fixed;
+  bottom: 10%;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 90%;
+  text-align: center;
+  font-size: 28px;
+  color: #ffd700;
+  text-shadow:
+    -1px -1px 0 #000,
+     1px -1px 0 #000,
+    -1px  1px 0 #000,
+     1px  1px 0 #000;
+  z-index: 999999;
+  pointer-events: none;
+  font-family: Arial, sans-serif;
+  white-space: normal;
+  word-wrap: break-word;
+  background-color: transparent;
+  line-height: 1.25;
+  padding: 2px 6px;
+}
 
+#better-captions-toggle {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  padding: 8px 12px;
+  background-color: #ffd700;
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 700;
+  z-index: 9999999;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+  font-size: 14px;
+  transition: background-color 0.2s ease, transform 0.15s ease;
+}
+
+#better-captions-toggle.is-off {
+  background-color: #9b9b9b;
+  color: #111;
+}
+
+#better-captions-toggle:hover {
+  transform: scale(1.05);
+}
+
+#better-captions-toggle:active {
+  transform: scale(0.95);
+}
+
+@media (max-width: 640px) {
+  #custom-caption-box {
+    max-width: 96%;
+  }
 
   #better-captions-toggle {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    padding: 8px 12px;
-    background-color: #FFD700;
-    color: #000;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    font-weight: bold;
-    z-index: 9999999;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-    font-size: 14px;
-    transition: background-color 0.3s, transform 0.15s;
+    bottom: 12px;
+    right: 12px;
+    padding: 7px 10px;
+    font-size: 13px;
   }
-  
-  #better-captions-toggle:hover {
-    transform: scale(1.05);
-  }
-  
-  #better-captions-toggle:active {
-    transform: scale(0.95);
-  }
+}

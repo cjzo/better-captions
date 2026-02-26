@@ -1,133 +1,135 @@
 // YouTube Caption Extension - content.js
 console.log("[Better Captions] Extension loaded");
 
-// Extension state
-const state = {
-  enabled: true,       // Default to enabled
-  language: 'en',      // Default language
-  hideButton: false,   // Default to showing the button
-  forceRefresh: true,  // Default to force refresh on new videos
-  captionsActive: false,
-  activeIntervalId: null,
-  captionUpdateIntervalId: null,
-  navigationObserver: null,
-  currentVideoId: null
+const DEFAULTS = {
+  enabled: true,
+  language: "en",
+  hideButton: false,
+  forceRefresh: false,
+  fontSize: 28,
+  bottomOffsetPercent: 10
 };
 
-// Wait for player to be ready
-function waitForVideoAndPlayerResponse() {
+// Extension state
+const state = {
+  ...DEFAULTS,
+  captionsActive: false,
+  activeRafId: null,
+  captionObserver: null,
+  navigationObserver: null,
+  currentVideoId: null,
+  currentTrackUrl: null,
+  runId: 0,
+  captionsCache: new Map(),
+  navDebounceId: null
+};
+
+function waitForVideoAndPlayerResponse(timeoutMs = 12000) {
+  const start = performance.now();
+
   return new Promise((resolve, reject) => {
-    let attempts = 0;
-    const interval = setInterval(() => {
-      const video = document.querySelector('video');
-      
-      // Try multiple possible player data locations
-      let playerData = null;
-      
-      try {
-        // Method 1: Direct window properties
-        playerData = window.ytInitialPlayerResponse || window.__PLAYER_RESPONSE__;
-        
-        // Method 2: Parse from ytplayer config if available
-        if (!playerData && window.ytplayer && window.ytplayer.config) {
-          const playerResponse = window.ytplayer.config.args && 
-            window.ytplayer.config.args.player_response;
-          if (playerResponse) {
-            try {
-              playerData = JSON.parse(playerResponse);
-            } catch (e) {
-              console.log("[Better Captions] Failed to parse player_response");
-            }
-          }
-        }
-        
-        // Method 3: Extract from page source as last resort
-        if (!playerData) {
-          const scriptElements = document.querySelectorAll('script');
-          for (const script of scriptElements) {
-            const text = script.textContent;
-            if (text && text.includes('ytInitialPlayerResponse')) {
-              const match = text.match(/ytInitialPlayerResponse\s*=\s*({.*?});/s);
-              if (match && match[1]) {
-                try {
-                  playerData = JSON.parse(match[1]);
-                  break;
-                } catch (e) {
-                  console.log("[Better Captions] Failed to parse from script tag");
-                }
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.error("[Better Captions] Error accessing player data:", e);
-      }
-      
+    const tick = () => {
+      const video = document.querySelector("video");
+      const playerData = getPlayerData();
+
       if (video && playerData) {
-        clearInterval(interval);
         resolve({ video, playerData });
+        return;
       }
-      
-      if (++attempts > 100) {
-        clearInterval(interval);
+
+      if (performance.now() - start > timeoutMs) {
         reject(new Error("Timeout: video/player not found."));
+        return;
       }
-    }, 300);
+
+      requestAnimationFrame(tick);
+    };
+
+    tick();
   });
+}
+
+function getPlayerData() {
+  try {
+    let playerData = window.ytInitialPlayerResponse || window.__PLAYER_RESPONSE__;
+
+    if (!playerData && window.ytplayer && window.ytplayer.config) {
+      const playerResponse = window.ytplayer.config.args && window.ytplayer.config.args.player_response;
+      if (playerResponse) {
+        try {
+          playerData = JSON.parse(playerResponse);
+        } catch (e) {
+          console.log("[Better Captions] Failed to parse player_response");
+        }
+      }
+    }
+
+    if (!playerData) {
+      const scripts = document.querySelectorAll("script");
+      for (const script of scripts) {
+        const text = script.textContent;
+        if (text && text.includes("ytInitialPlayerResponse")) {
+          const match = text.match(/ytInitialPlayerResponse\s*=\s*({.*?});/s);
+          if (match && match[1]) {
+            try {
+              playerData = JSON.parse(match[1]);
+              break;
+            } catch (e) {
+              console.log("[Better Captions] Failed to parse from script tag");
+            }
+          }
+        }
+      }
+    }
+
+    return playerData || null;
+  } catch (e) {
+    console.error("[Better Captions] Error accessing player data:", e);
+    return null;
+  }
 }
 
 function getCaptionTrackUrl(playerData) {
   try {
-    // Handle more potential paths to captions data
-    const tracks = 
-      playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks || 
+    const tracks =
+      playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks ||
       playerData?.playerCaptionsTracklistRenderer?.captionTracks;
-    
+
     if (!tracks || tracks.length === 0) {
       console.log("[Better Captions] No caption tracks found");
       return null;
     }
-    
-    console.log("[Better Captions] Found caption tracks:", tracks.length);
-    
-    // First check if we should use the user-selected language
+
     let selectedTrack = null;
-    
-    if (state.language !== 'auto') {
-      // Look for exact match first
+
+    if (state.language !== "auto") {
       selectedTrack = tracks.find(t => t.languageCode === state.language);
-      
-      // Then look for partial matches (like "en-US" for "en")
       if (!selectedTrack) {
-        selectedTrack = tracks.find(t => t.languageCode.startsWith(state.language + '-'));
+        selectedTrack = tracks.find(t => t.languageCode.startsWith(state.language + "-"));
       }
     }
-    
-    // Fallback to English or first available track
+
     if (!selectedTrack) {
-      // Try to find English track if not specifically looking for another language
-      if (state.language === 'en' || state.language === 'auto') {
-        selectedTrack = tracks.find(t => 
-          t.languageCode === "en" || 
-          t.languageCode === "en-US" || 
+      if (state.language === "en" || state.language === "auto") {
+        selectedTrack = tracks.find(t =>
+          t.languageCode === "en" ||
+          t.languageCode === "en-US" ||
           t.languageCode === "en-GB"
         );
       }
-      
-      // If still no track found, use the first available
+
       if (!selectedTrack) {
         selectedTrack = tracks[0];
       }
     }
-    
+
     console.log("[Better Captions] Selected track:", selectedTrack.languageCode);
-    
-    // YouTube sometimes uses a proxy URL that requires additional params
+
     let url = selectedTrack.baseUrl;
-    if (!url.includes('&fmt=')) {
-      url += '&fmt=json3';
+    if (!url.includes("&fmt=")) {
+      url += "&fmt=json3";
     }
-    
+
     return url;
   } catch (error) {
     console.error("[Better Captions] Caption track error:", error);
@@ -137,11 +139,12 @@ function getCaptionTrackUrl(playerData) {
 
 function parseTime(timeStr) {
   try {
-    const parts = timeStr.replace(',', '.').split(':').map(Number);
+    const parts = timeStr.replace(",", ".").split(":").map(Number);
     if (parts.length === 3) {
       const [h, m, s] = parts;
       return h * 3600 + m * 60 + s;
-    } else if (parts.length === 2) {
+    }
+    if (parts.length === 2) {
       const [m, s] = parts;
       return m * 60 + s;
     }
@@ -153,32 +156,36 @@ function parseTime(timeStr) {
 }
 
 async function fetchCaptions(url) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+
   try {
     console.log("[Better Captions] Fetching captions from:", url);
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      throw new Error("Caption fetch failed: " + res.status);
+    }
     const text = await res.text();
-    
-    // Handle XML format
-    if (text.includes('<?xml') || text.includes('<transcript>')) {
-      console.log("[Better Captions] Parsing XML captions");
+
+    if (text.includes("<?xml") || text.includes("<transcript>")) {
       const parser = new DOMParser();
       const xmlDoc = parser.parseFromString(text, "text/xml");
-      const textNodes = xmlDoc.querySelectorAll('text');
-      
-      return Array.from(textNodes).map(node => {
-        const start = parseFloat(node.getAttribute('start') || 0);
-        const dur = parseFloat(node.getAttribute('dur') || 0);
-        return {
-          start,
-          end: start + dur,
-          text: node.textContent || ""
-        };
-      }).filter(caption => caption.text.trim() !== "");
+      const textNodes = xmlDoc.querySelectorAll("text");
+
+      return Array.from(textNodes)
+        .map(node => {
+          const start = parseFloat(node.getAttribute("start") || 0);
+          const dur = parseFloat(node.getAttribute("dur") || 0);
+          return {
+            start,
+            end: start + dur,
+            text: node.textContent || ""
+          };
+        })
+        .filter(caption => caption.text.trim() !== "");
     }
-    
-    // Handle JSON format
-    if (text.trim().startsWith('{') && text.includes('"events":')) {
-      console.log("[Better Captions] Parsing JSON captions");
+
+    if (text.trim().startsWith("{") && text.includes("\"events\":")) {
       try {
         const json = JSON.parse(text);
         if (json.events) {
@@ -187,8 +194,8 @@ async function fetchCaptions(url) {
             .map(event => {
               const start = event.tStartMs / 1000;
               const end = (event.tStartMs + (event.dDurationMs || 0)) / 1000;
-              const text = event.segs.map(seg => seg.utf8 || "").join("");
-              return { start, end, text: text.trim() };
+              const captionText = event.segs.map(seg => seg.utf8 || "").join("");
+              return { start, end, text: captionText.trim() };
             })
             .filter(caption => caption.text !== "");
         }
@@ -196,379 +203,408 @@ async function fetchCaptions(url) {
         console.error("[Better Captions] Failed to parse JSON captions:", e);
       }
     }
-    
-    // Handle SRT/VTT format as fallback
-    console.log("[Better Captions] Parsing SRT/VTT captions");
-    return text.split(/\n\n+/).map(block => {
-      const lines = block.trim().split('\n');
-      if (lines.length < 2) return null;
-      
-      // Skip index number if present
-      let startIndex = 0;
-      if (/^\d+$/.test(lines[0])) {
-        startIndex = 1;
-      }
-      
-      if (startIndex >= lines.length) return null;
-      
-      const timeLine = lines[startIndex];
-      const textLines = lines.slice(startIndex + 1);
-      
-      const timeMatch = timeLine.match(/(\d+:\d+:\d+[\.,]\d+|\d+:\d+[\.,]\d+) --> (\d+:\d+:\d+[\.,]\d+|\d+:\d+[\.,]\d+)/);
-      if (!timeMatch) return null;
-      
-      const [_, startStr, endStr] = timeMatch;
-      const start = parseTime(startStr);
-      const end = parseTime(endStr);
-      return { 
-        start, 
-        end, 
-        text: textLines.join(' ').trim()
-      };
-    }).filter(Boolean);
+
+    return text
+      .split(/\n\n+/)
+      .map(block => {
+        const lines = block.trim().split("\n");
+        if (lines.length < 2) return null;
+
+        let startIndex = 0;
+        if (/^\d+$/.test(lines[0])) {
+          startIndex = 1;
+        }
+
+        if (startIndex >= lines.length) return null;
+
+        const timeLine = lines[startIndex];
+        const textLines = lines.slice(startIndex + 1);
+
+        const timeMatch = timeLine.match(/(\d+:\d+:\d+[\.,]\d+|\d+:\d+[\.,]\d+) --> (\d+:\d+:\d+[\.,]\d+|\d+:\d+[\.,]\d+)/);
+        if (!timeMatch) return null;
+
+        const [, startStr, endStr] = timeMatch;
+        const start = parseTime(startStr);
+        const end = parseTime(endStr);
+        return {
+          start,
+          end,
+          text: textLines.join(" ").trim()
+        };
+      })
+      .filter(Boolean);
   } catch (error) {
     console.error("[Better Captions] Fetch captions error:", error);
     return [];
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
 function createCaptionBox() {
-  let box = document.getElementById('custom-caption-box');
+  let box = document.getElementById("custom-caption-box");
   if (box) return box;
-  
-  box = document.createElement('div');
-  box.id = 'custom-caption-box';
+
+  box = document.createElement("div");
+  box.id = "custom-caption-box";
   document.body.appendChild(box);
-  
-  // Hide if captions are disabled
+
+  applyCaptionBoxPreferences(box);
+
   if (!state.enabled) {
-    box.style.display = 'none';
+    box.style.display = "none";
   }
-  
+
   return box;
 }
 
-function syncCaptions(video, captions, box) {
-  let lastCaptionText = "";
-  
-  // Clear existing interval if any
-  if (state.activeIntervalId) {
-    clearInterval(state.activeIntervalId);
-    state.activeIntervalId = null;
+function applyCaptionBoxPreferences(box) {
+  box.style.fontSize = `${state.fontSize}px`;
+  box.style.bottom = `${state.bottomOffsetPercent}%`;
+}
+
+function cleanupCaptionLoop() {
+  if (state.activeRafId) {
+    cancelAnimationFrame(state.activeRafId);
+    state.activeRafId = null;
   }
-  
-  state.activeIntervalId = setInterval(() => {
+  if (state.captionObserver) {
+    state.captionObserver.disconnect();
+    state.captionObserver = null;
+  }
+}
+
+function syncCaptions(video, captions, box) {
+  cleanupCaptionLoop();
+
+  let lastCaptionText = "";
+  let index = 0;
+
+  const clampIndex = () => {
+    if (index < 0) index = 0;
+    if (index >= captions.length) index = captions.length - 1;
+  };
+
+  const tick = () => {
     if (!document.body.contains(video) || !document.body.contains(box)) {
-      // Clean up if elements are removed
-      clearInterval(state.activeIntervalId);
-      state.activeIntervalId = null;
+      cleanupCaptionLoop();
       return;
     }
-    
+
     const time = video.currentTime;
-    const active = captions.find(c => time >= c.start && time <= c.end);
-    const currentText = active ? active.text : "";
-    
-    // Only update DOM when text changes
+
+    while (index < captions.length && time > captions[index].end) {
+      index += 1;
+    }
+    while (index > 0 && time < captions[index].start) {
+      index -= 1;
+    }
+
+    clampIndex();
+
+    const active = captions[index];
+    const currentText = active && time >= active.start && time <= active.end ? active.text : "";
+
     if (currentText !== lastCaptionText) {
       box.innerText = currentText;
       lastCaptionText = currentText;
     }
-  }, 100);
-  
-  return state.activeIntervalId;
+
+    state.activeRafId = requestAnimationFrame(tick);
+  };
+
+  state.activeRafId = requestAnimationFrame(tick);
+  return state.activeRafId;
+}
+
+function startDomCaptionObserver(box) {
+  cleanupCaptionLoop();
+
+  const container = document.querySelector(".ytp-caption-window-container");
+  if (!container) {
+    return null;
+  }
+
+  const update = () => {
+    const segments = container.querySelectorAll(".ytp-caption-segment");
+    const text = Array.from(segments).map(seg => seg.textContent || "").join("");
+    box.innerText = text;
+  };
+
+  const observer = new MutationObserver(update);
+  observer.observe(container, { childList: true, subtree: true, characterData: true });
+  update();
+
+  state.captionObserver = observer;
+  return observer;
 }
 
 function createToggleButton() {
-  // Remove any existing button
-  const existingButton = document.getElementById('better-captions-toggle');
+  const existingButton = document.getElementById("better-captions-toggle");
   if (existingButton) {
     existingButton.remove();
   }
-  
-  // If button is set to be hidden, don't create it
+
   if (state.hideButton) {
     return null;
   }
-  
-  // Create new button
-  const button = document.createElement('button');
-  button.id = 'better-captions-toggle';
-  button.textContent = state.enabled ? 'Captions: ON' : 'Captions: OFF';
-  
-  // Style the button
-  Object.assign(button.style, {
-    position: 'fixed',
-    bottom: '20px',
-    right: '20px',
-    padding: '8px 12px',
-    backgroundColor: state.enabled ? '#FFD700' : '#999',
-    color: '#000',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-    fontWeight: 'bold',
-    zIndex: '9999999',
-    boxShadow: '0 2px 5px rgba(0,0,0,0.3)',
-    fontSize: '14px',
-    transition: 'background-color 0.3s, transform 0.15s'
-  });
-  
-  // Add button hover effect
-  button.addEventListener('mouseover', () => {
-    button.style.transform = 'scale(1.05)';
-  });
-  
-  button.addEventListener('mouseout', () => {
-    button.style.transform = 'scale(1)';
-  });
-  
-  // Toggle captions on click
-  button.addEventListener('click', () => {
+
+  const button = document.createElement("button");
+  button.id = "better-captions-toggle";
+  button.type = "button";
+  button.setAttribute("aria-pressed", state.enabled ? "true" : "false");
+  button.textContent = state.enabled ? "Captions: ON" : "Captions: OFF";
+  button.classList.toggle("is-off", !state.enabled);
+
+  button.addEventListener("click", () => {
     state.enabled = !state.enabled;
-    button.textContent = state.enabled ? 'Captions: ON' : 'Captions: OFF';
-    button.style.backgroundColor = state.enabled ? '#FFD700' : '#999';
-    
-    // Get caption box
-    const captionBox = document.getElementById('custom-caption-box');
+    button.textContent = state.enabled ? "Captions: ON" : "Captions: OFF";
+    button.setAttribute("aria-pressed", state.enabled ? "true" : "false");
+    button.classList.toggle("is-off", !state.enabled);
+
+    const captionBox = document.getElementById("custom-caption-box");
     if (captionBox) {
-      captionBox.style.display = state.enabled ? 'block' : 'none';
+      captionBox.style.display = state.enabled ? "block" : "none";
     }
-    
-    // Save preference to Chrome storage
+
     chrome.storage.sync.set({ enabled: state.enabled });
   });
-  
+
   document.body.appendChild(button);
   return button;
 }
 
 async function runCaptionSync() {
+  const runId = ++state.runId;
+
   try {
-    // Clear previous intervals
-    if (state.captionUpdateIntervalId) {
-      clearInterval(state.captionUpdateIntervalId);
-      state.captionUpdateIntervalId = null;
-    }
-    
-    if (state.activeIntervalId) {
-      clearInterval(state.activeIntervalId);
-      state.activeIntervalId = null;
-    }
-    
-    // Create or update button
+    cleanupCaptionLoop();
+
     createToggleButton();
-    
-    // Create caption box
+
     const box = createCaptionBox();
-    
+
     if (!state.enabled) {
-      box.style.display = 'none';
+      box.style.display = "none";
       return;
     }
-    
+
+    box.style.display = "block";
+
     console.log("[Better Captions] Starting caption sync...");
     const { video, playerData } = await waitForVideoAndPlayerResponse();
-    console.log("[Better Captions] Found video and player data");
-    
+    if (runId !== state.runId) return;
+
     const trackUrl = getCaptionTrackUrl(playerData);
-    
+    if (runId !== state.runId) return;
+
     if (trackUrl) {
-      const captions = await fetchCaptions(trackUrl);
-      console.log("[Better Captions] Loaded captions:", captions.length);
-      
-      if (captions.length > 0) {
-        state.activeIntervalId = syncCaptions(video, captions, box);
+      state.currentTrackUrl = trackUrl;
+
+      const cacheKey = `${state.currentVideoId || "unknown"}|${state.language}|${trackUrl}`;
+      let captions = state.captionsCache.get(cacheKey);
+
+      if (!captions) {
+        captions = await fetchCaptions(trackUrl);
+        state.captionsCache.set(cacheKey, captions);
+      }
+
+      if (runId !== state.runId) return;
+
+      if (captions && captions.length > 0) {
+        syncCaptions(video, captions, box);
         state.captionsActive = true;
         return;
       }
     }
-    
+
     console.log("[Better Captions] Using DOM fallback for captions");
-    // Fallback to YouTube's built-in captions
-    state.captionUpdateIntervalId = setInterval(() => {
-      const domCaption = document.querySelector('.ytp-caption-segment');
-      if (domCaption) {
-        box.innerText = domCaption.innerText || "";
-      } else {
-        box.innerText = "";
-      }
-    }, 100);
-    
+    const observer = startDomCaptionObserver(box);
+    if (!observer) {
+      box.innerText = "";
+    }
+
     state.captionsActive = true;
-    
   } catch (e) {
     console.error("[Better Captions] Failed:", e);
   }
 }
 
-// Extract video ID from YouTube URL
 function getYoutubeVideoId(url) {
-  const urlObj = new URL(url);
-  
-  // Handle regular watch URLs
-  if (urlObj.pathname === '/watch') {
-    return urlObj.searchParams.get('v');
+  try {
+    const urlObj = new URL(url);
+
+    if (urlObj.pathname === "/watch") {
+      return urlObj.searchParams.get("v");
+    }
+
+    if (urlObj.pathname.startsWith("/shorts/")) {
+      return urlObj.pathname.split("/")[2];
+    }
+
+    if (urlObj.pathname.startsWith("/embed/")) {
+      return urlObj.pathname.split("/")[2];
+    }
+
+    return null;
+  } catch {
+    return null;
   }
-  
-  // Handle short URLs like /shorts/videoId
-  if (urlObj.pathname.startsWith('/shorts/')) {
-    return urlObj.pathname.split('/')[2];
-  }
-  
-  // Handle embedded URLs
-  if (urlObj.pathname.startsWith('/embed/')) {
-    return urlObj.pathname.split('/')[2];
-  }
-  
-  return null;
 }
 
-// Clear all caption system state
 function clearCaptionSystem() {
-  // Clear intervals
-  if (state.captionUpdateIntervalId) {
-    clearInterval(state.captionUpdateIntervalId);
-    state.captionUpdateIntervalId = null;
-  }
-  
-  if (state.activeIntervalId) {
-    clearInterval(state.activeIntervalId);
-    state.activeIntervalId = null;
-  }
-  
-  // Reset caption box
-  const box = document.getElementById('custom-caption-box');
+  cleanupCaptionLoop();
+
+  const box = document.getElementById("custom-caption-box");
   if (box) box.innerText = "";
-  
+
   state.captionsActive = false;
 }
 
-// Track YouTube URL changes (for SPA navigation)
 let lastUrl = location.href;
+
+function handleNavigationChange() {
+  if (state.navDebounceId) {
+    clearTimeout(state.navDebounceId);
+  }
+
+  state.navDebounceId = setTimeout(() => {
+    const newUrl = location.href;
+    if (newUrl === lastUrl) return;
+
+    console.log("[Better Captions] URL changed from", lastUrl, "to", newUrl);
+
+    const oldVideoId = state.currentVideoId;
+    const newVideoId = getYoutubeVideoId(newUrl);
+    state.currentVideoId = newVideoId;
+
+    lastUrl = newUrl;
+    clearCaptionSystem();
+
+    if (state.forceRefresh && oldVideoId && newVideoId && oldVideoId !== newVideoId) {
+      console.log("[Better Captions] Forcing page refresh for new video");
+      window.location.reload();
+      return;
+    }
+
+    runCaptionSync();
+  }, 400);
+}
 
 function setupNavigationObserver() {
   if (state.navigationObserver) {
     state.navigationObserver.disconnect();
   }
-  
-  state.navigationObserver = new MutationObserver((mutations) => {
+
+  const onNavigate = () => handleNavigationChange();
+
+  window.addEventListener("yt-navigate-finish", onNavigate, true);
+  window.addEventListener("yt-page-data-updated", onNavigate, true);
+
+  state.navigationObserver = new MutationObserver(() => {
     if (location.href !== lastUrl) {
-      console.log("[Better Captions] URL changed from", lastUrl, "to", location.href);
-      
-      const oldVideoId = state.currentVideoId;
-      const newVideoId = getYoutubeVideoId(location.href);
-      state.currentVideoId = newVideoId;
-      
-      lastUrl = location.href;
-      
-      clearCaptionSystem();
-      
-      // If video ID changed and force refresh is enabled, reload the page
-      if (state.forceRefresh && oldVideoId && newVideoId && oldVideoId !== newVideoId) {
-        console.log("[Better Captions] Forcing page refresh for new video");
-        window.location.reload();
-        return;
-      }
-      
-      // Wait a bit for the new page to load
-      setTimeout(runCaptionSync, 1500);
+      handleNavigationChange();
     }
   });
-  
-  state.navigationObserver.observe(document.body, { 
-    childList: true, 
-    subtree: true 
+
+  state.navigationObserver.observe(document.body, {
+    childList: true,
+    subtree: true
   });
-  
-  // Set initial video ID
+
   state.currentVideoId = getYoutubeVideoId(location.href);
 }
 
-// Initialize after DOM is fully loaded
 function initialize() {
   console.log("[Better Captions] Initializing extension...");
-  
-  // Load user preferences from Chrome storage
+
   chrome.storage.sync.get(
-    { 
-      enabled: true, 
-      language: 'en',
-      hideButton: false,
-      forceRefresh: true
-    }, 
+    {
+      enabled: DEFAULTS.enabled,
+      language: DEFAULTS.language,
+      hideButton: DEFAULTS.hideButton,
+      forceRefresh: DEFAULTS.forceRefresh,
+      fontSize: DEFAULTS.fontSize,
+      bottomOffsetPercent: DEFAULTS.bottomOffsetPercent
+    },
     prefs => {
       state.enabled = prefs.enabled;
       state.language = prefs.language;
       state.hideButton = prefs.hideButton;
       state.forceRefresh = prefs.forceRefresh;
+      state.fontSize = prefs.fontSize;
+      state.bottomOffsetPercent = prefs.bottomOffsetPercent;
       console.log("[Better Captions] Loaded preferences:", prefs);
-      
+
       setupNavigationObserver();
-      
-      // Initial run after a delay to ensure YouTube is ready
-      setTimeout(runCaptionSync, 2000);
+
+      setTimeout(runCaptionSync, 800);
     }
   );
-  
-  // Listen for changes from popup
+
   chrome.storage.onChanged.addListener((changes, namespace) => {
-    if (namespace !== 'sync') return;
-    
+    if (namespace !== "sync") return;
+
     let needsRestart = false;
-    
+
     if (changes.enabled && changes.enabled.newValue !== undefined) {
       state.enabled = changes.enabled.newValue;
-      
-      // Update button if it exists
-      const button = document.getElementById('better-captions-toggle');
+
+      const button = document.getElementById("better-captions-toggle");
       if (button) {
-        button.textContent = state.enabled ? 'Captions: ON' : 'Captions: OFF';
-        button.style.backgroundColor = state.enabled ? '#FFD700' : '#999';
+        button.textContent = state.enabled ? "Captions: ON" : "Captions: OFF";
+        button.setAttribute("aria-pressed", state.enabled ? "true" : "false");
+        button.classList.toggle("is-off", !state.enabled);
       }
-      
-      // Update caption box visibility
-      const box = document.getElementById('custom-caption-box');
+
+      const box = document.getElementById("custom-caption-box");
       if (box) {
-        box.style.display = state.enabled ? 'block' : 'none';
+        box.style.display = state.enabled ? "block" : "none";
       }
     }
-    
+
     if (changes.language && changes.language.newValue !== undefined) {
       state.language = changes.language.newValue;
       needsRestart = true;
     }
-    
+
     if (changes.hideButton && changes.hideButton.newValue !== undefined) {
       state.hideButton = changes.hideButton.newValue;
-      
-      // Handle button visibility
-      const existingButton = document.getElementById('better-captions-toggle');
+
+      const existingButton = document.getElementById("better-captions-toggle");
       if (existingButton) {
         if (state.hideButton) {
           existingButton.remove();
         }
       } else if (!state.hideButton) {
-        // Create button if it doesn't exist and should be shown
         createToggleButton();
       }
     }
-    
+
     if (changes.forceRefresh && changes.forceRefresh.newValue !== undefined) {
       state.forceRefresh = changes.forceRefresh.newValue;
     }
-    
-    // If language changed, we need to restart to get new captions
+
+    if (changes.fontSize && changes.fontSize.newValue !== undefined) {
+      state.fontSize = changes.fontSize.newValue;
+      const box = document.getElementById("custom-caption-box");
+      if (box) applyCaptionBoxPreferences(box);
+    }
+
+    if (changes.bottomOffsetPercent && changes.bottomOffsetPercent.newValue !== undefined) {
+      state.bottomOffsetPercent = changes.bottomOffsetPercent.newValue;
+      const box = document.getElementById("custom-caption-box");
+      if (box) applyCaptionBoxPreferences(box);
+    }
+
     if (needsRestart && state.enabled) {
       runCaptionSync();
     }
   });
 }
 
-// If the page is still loading, wait for it to finish
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initialize);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initialize);
 } else {
-  // Page already loaded
   initialize();
 }
