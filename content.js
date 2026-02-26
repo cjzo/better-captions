@@ -7,7 +7,9 @@ const DEFAULTS = {
   hideButton: false,
   forceRefresh: false,
   fontSize: 28,
-  bottomOffsetPercent: 10
+  bottomOffsetPercent: 10,
+  style: "glass",
+  hideNativeCaptions: true
 };
 
 // Extension state
@@ -24,7 +26,7 @@ const state = {
   navDebounceId: null,
   retryCount: 0,
   retryTimerId: null,
-  ccToggleAttempted: false
+  lastNativeCcState: null
 };
 
 function waitForVideoAndPlayerResponse(timeoutMs = 12000) {
@@ -309,6 +311,7 @@ function createCaptionBox() {
 function applyCaptionBoxPreferences(box) {
   box.style.fontSize = `${state.fontSize}px`;
   box.style.bottom = `${state.bottomOffsetPercent}%`;
+  box.dataset.style = state.style;
 }
 
 function resetRetries() {
@@ -338,23 +341,51 @@ function scheduleRetry(reason) {
   }, delay);
 }
 
-function ensureNativeCaptionsEnabled() {
-  if (state.ccToggleAttempted) return;
-  state.ccToggleAttempted = true;
-
+function setNativeCaptionsEnabled(shouldEnable) {
   const ccButton = document.querySelector(".ytp-subtitles-button");
-  if (ccButton) {
-    const pressed = ccButton.getAttribute("aria-pressed");
-    if (pressed === "false") {
-      ccButton.click();
-      console.log("[Better Captions] Toggled native captions on");
+  if (!ccButton) return false;
+
+  const pressed = ccButton.getAttribute("aria-pressed");
+  const isEnabled = pressed === "true";
+  if (state.lastNativeCcState === shouldEnable) return true;
+
+  if (shouldEnable !== isEnabled) {
+    ccButton.click();
+  }
+
+  state.lastNativeCcState = shouldEnable;
+  console.log("[Better Captions] Native captions set to", shouldEnable);
+  return true;
+}
+
+function normalizeCaptions(captions) {
+  if (!Array.isArray(captions)) return [];
+
+  const sorted = captions
+    .filter(c => Number.isFinite(c.start))
+    .slice()
+    .sort((a, b) => a.start - b.start);
+
+  for (let i = 0; i < sorted.length; i += 1) {
+    const current = sorted[i];
+    const next = sorted[i + 1];
+    const hasDuration = Number.isFinite(current.end) && current.end > current.start;
+    if (!hasDuration) {
+      const fallbackEnd = next ? Math.max(current.start + 0.6, next.start - 0.05) : current.start + 2;
+      current.end = fallbackEnd;
     }
   }
+
+  return sorted;
 }
 
 function cleanupCaptionLoop() {
   if (state.activeRafId) {
-    cancelAnimationFrame(state.activeRafId);
+    if (typeof state.activeRafId === "number") {
+      cancelAnimationFrame(state.activeRafId);
+    } else if (state.activeRafId && typeof state.activeRafId.cancel === "function") {
+      state.activeRafId.cancel();
+    }
     state.activeRafId = null;
   }
   if (state.captionObserver) {
@@ -367,30 +398,35 @@ function syncCaptions(video, captions, box) {
   cleanupCaptionLoop();
 
   let lastCaptionText = "";
-  let index = 0;
 
-  const clampIndex = () => {
-    if (index < 0) index = 0;
-    if (index >= captions.length) index = captions.length - 1;
+  const findIndex = time => {
+    let low = 0;
+    let high = captions.length - 1;
+    let mid;
+
+    while (low <= high) {
+      mid = Math.floor((low + high) / 2);
+      const item = captions[mid];
+      if (time < item.start) {
+        high = mid - 1;
+      } else if (time > item.end) {
+        low = mid + 1;
+      } else {
+        return mid;
+      }
+    }
+
+    return Math.max(0, Math.min(captions.length - 1, low));
   };
 
-  const tick = () => {
+  const render = () => {
     if (!document.body.contains(video) || !document.body.contains(box)) {
       cleanupCaptionLoop();
       return;
     }
 
     const time = video.currentTime;
-
-    while (index < captions.length && time > captions[index].end) {
-      index += 1;
-    }
-    while (index > 0 && time < captions[index].start) {
-      index -= 1;
-    }
-
-    clampIndex();
-
+    const index = findIndex(time);
     const active = captions[index];
     const currentText = active && time >= active.start && time <= active.end ? active.text : "";
 
@@ -398,11 +434,29 @@ function syncCaptions(video, captions, box) {
       box.innerText = currentText;
       lastCaptionText = currentText;
     }
-
-    state.activeRafId = requestAnimationFrame(tick);
   };
 
-  state.activeRafId = requestAnimationFrame(tick);
+  if (typeof video.requestVideoFrameCallback === "function") {
+    const handle = { id: null, cancel: () => {} };
+    const onFrame = () => {
+      render();
+      handle.id = video.requestVideoFrameCallback(onFrame);
+    };
+    handle.id = video.requestVideoFrameCallback(onFrame);
+    handle.cancel = () => {
+      if (handle.id) {
+        video.cancelVideoFrameCallback(handle.id);
+      }
+    };
+    state.activeRafId = handle;
+  } else {
+    const tick = () => {
+      render();
+      state.activeRafId = requestAnimationFrame(tick);
+    };
+    state.activeRafId = requestAnimationFrame(tick);
+  }
+
   return state.activeRafId;
 }
 
@@ -468,7 +522,6 @@ async function runCaptionSync() {
 
   try {
     cleanupCaptionLoop();
-    state.ccToggleAttempted = false;
 
     createToggleButton();
 
@@ -502,7 +555,11 @@ async function runCaptionSync() {
       if (runId !== state.runId) return;
 
       if (captions && captions.length > 0) {
-        syncCaptions(video, captions, box);
+        const normalized = normalizeCaptions(captions);
+        if (state.hideNativeCaptions) {
+          setNativeCaptionsEnabled(false);
+        }
+        syncCaptions(video, normalized, box);
         state.captionsActive = true;
         resetRetries();
         return;
@@ -510,7 +567,7 @@ async function runCaptionSync() {
     }
 
     console.log("[Better Captions] Using DOM fallback for captions");
-    ensureNativeCaptionsEnabled();
+    setNativeCaptionsEnabled(true);
     const observer = startDomCaptionObserver(box);
     if (!observer) {
       box.innerText = "";
@@ -623,7 +680,9 @@ function initialize() {
       hideButton: DEFAULTS.hideButton,
       forceRefresh: DEFAULTS.forceRefresh,
       fontSize: DEFAULTS.fontSize,
-      bottomOffsetPercent: DEFAULTS.bottomOffsetPercent
+      bottomOffsetPercent: DEFAULTS.bottomOffsetPercent,
+      style: DEFAULTS.style,
+      hideNativeCaptions: DEFAULTS.hideNativeCaptions
     },
     prefs => {
       state.enabled = prefs.enabled;
@@ -632,6 +691,8 @@ function initialize() {
       state.forceRefresh = prefs.forceRefresh;
       state.fontSize = prefs.fontSize;
       state.bottomOffsetPercent = prefs.bottomOffsetPercent;
+      state.style = prefs.style || DEFAULTS.style;
+      state.hideNativeCaptions = prefs.hideNativeCaptions ?? DEFAULTS.hideNativeCaptions;
       console.log("[Better Captions] Loaded preferences:", prefs);
 
       setupNavigationObserver();
@@ -693,6 +754,19 @@ function initialize() {
       state.bottomOffsetPercent = changes.bottomOffsetPercent.newValue;
       const box = document.getElementById("custom-caption-box");
       if (box) applyCaptionBoxPreferences(box);
+    }
+
+    if (changes.style && changes.style.newValue !== undefined) {
+      state.style = changes.style.newValue;
+      const box = document.getElementById("custom-caption-box");
+      if (box) applyCaptionBoxPreferences(box);
+    }
+
+    if (changes.hideNativeCaptions && changes.hideNativeCaptions.newValue !== undefined) {
+      state.hideNativeCaptions = changes.hideNativeCaptions.newValue;
+      if (state.enabled && state.hideNativeCaptions) {
+        setNativeCaptionsEnabled(false);
+      }
     }
 
     if (needsRestart && state.enabled) {

@@ -4,12 +4,12 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #f6f3ef;
+      --bg: #f7f7f8;
       --card: #ffffff;
-      --ink: #1d1a17;
-      --muted: #6b6460;
-      --accent: #ffb703;
-      --accent-2: #f48c06;
+      --ink: #1c1c1f;
+      --muted: #6b6b72;
+      --accent: #2f6fed;
+      --accent-2: #6aa5ff;
       --shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
     }
 
@@ -22,7 +22,7 @@
       width: 300px;
       padding: 16px;
       color: var(--ink);
-      background: radial-gradient(circle at top, #fff7e6, var(--bg));
+      background: #f0f1f4;
     }
 
     .card {
@@ -108,7 +108,7 @@
       position: absolute;
       cursor: pointer;
       inset: 0;
-      background: #d6d2ce;
+      background: #d6d7dd;
       border-radius: 999px;
       transition: all 0.2s ease;
     }
@@ -172,6 +172,17 @@
     </div>
 
     <div class="stack">
+      <label for="style">Caption Style</label>
+      <select id="style">
+        <option value="glass">Glass</option>
+        <option value="classic-yellow">Classic Yellow</option>
+        <option value="cinema">Cinema</option>
+        <option value="minimal">Minimal</option>
+        <option value="neon">Neon</option>
+      </select>
+    </div>
+
+    <div class="stack">
       <div class="row" style="margin-bottom: 0;">
         <label for="font_size">Caption Size</label>
         <span class="value" id="font_size_value">28px</span>
@@ -188,6 +199,17 @@
     </div>
 
     <div class="divider"></div>
+
+    <div class="row">
+      <div>
+        <label for="hide_native">Hide YouTube Captions</label>
+        <div class="muted">Avoid double captions.</div>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="hide_native">
+        <span class="slider"></span>
+      </label>
+    </div>
 
     <div class="row">
       <div>

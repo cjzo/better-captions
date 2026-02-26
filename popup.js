@@ -7,6 +7,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const fontSizeValue = document.getElementById('font_size_value');
   const bottomOffset = document.getElementById('bottom_offset');
   const bottomOffsetValue = document.getElementById('bottom_offset_value');
+  const style = document.getElementById('style');
+  const hideNative = document.getElementById('hide_native');
 
   const DEFAULTS = {
     enabled: true,
@@ -14,7 +16,9 @@ document.addEventListener('DOMContentLoaded', () => {
     hideButton: false,
     forceRefresh: false,
     fontSize: 28,
-    bottomOffsetPercent: 10
+    bottomOffsetPercent: 10,
+    style: 'glass',
+    hideNativeCaptions: true
   };
 
   const updateFontSizeLabel = value => {
@@ -32,6 +36,8 @@ document.addEventListener('DOMContentLoaded', () => {
     forceRefresh.checked = prefs.forceRefresh;
     fontSize.value = prefs.fontSize;
     bottomOffset.value = prefs.bottomOffsetPercent;
+    style.value = prefs.style || DEFAULTS.style;
+    hideNative.checked = prefs.hideNativeCaptions ?? DEFAULTS.hideNativeCaptions;
 
     updateFontSizeLabel(prefs.fontSize);
     updateBottomOffsetLabel(prefs.bottomOffsetPercent);
@@ -45,8 +51,16 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.sync.set({ language: lang.value });
   });
 
+  style.addEventListener('change', () => {
+    chrome.storage.sync.set({ style: style.value });
+  });
+
   hideButton.addEventListener('change', () => {
     chrome.storage.sync.set({ hideButton: hideButton.checked });
+  });
+
+  hideNative.addEventListener('change', () => {
+    chrome.storage.sync.set({ hideNativeCaptions: hideNative.checked });
   });
 
   forceRefresh.addEventListener('change', () => {
