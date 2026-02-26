@@ -4,7 +4,7 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #f7f7f8;
+      --bg: #ffffff;
       --card: #ffffff;
       --ink: #1c1c1f;
       --muted: #6b6b72;
@@ -22,7 +22,7 @@
       width: 300px;
       padding: 16px;
       color: var(--ink);
-      background: #f0f1f4;
+      background: var(--bg);
     }
 
     .card {
@@ -179,6 +179,8 @@
         <option value="cinema">Cinema</option>
         <option value="minimal">Minimal</option>
         <option value="neon">Neon</option>
+        <option value="subtitle-bar">Subtitle Bar</option>
+        <option value="outline">Outline</option>
       </select>
     </div>
 
@@ -196,6 +198,24 @@
         <span class="value" id="bottom_offset_value">10%</span>
       </div>
       <input type="range" id="bottom_offset" min="5" max="25" step="1">
+    </div>
+
+    <div class="stack">
+      <div class="row" style="margin-bottom: 0;">
+        <label for="bg_opacity">Background Opacity</label>
+        <span class="value" id="bg_opacity_value">45%</span>
+      </div>
+      <input type="range" id="bg_opacity" min="0" max="80" step="1">
+    </div>
+
+    <div class="stack">
+      <label for="text_color">Text Color</label>
+      <select id="text_color">
+        <option value="auto">Auto</option>
+        <option value="#ffffff">White</option>
+        <option value="#ffd700">Yellow</option>
+        <option value="#a7f3ff">Cyan</option>
+      </select>
     </div>
 
     <div class="divider"></div>

@@ -9,7 +9,9 @@ const DEFAULTS = {
   fontSize: 28,
   bottomOffsetPercent: 10,
   style: "glass",
-  hideNativeCaptions: true
+  hideNativeCaptions: true,
+  bgOpacity: 45,
+  textColor: "auto"
 };
 
 // Extension state
@@ -312,6 +314,17 @@ function applyCaptionBoxPreferences(box) {
   box.style.fontSize = `${state.fontSize}px`;
   box.style.bottom = `${state.bottomOffsetPercent}%`;
   box.dataset.style = state.style;
+  box.style.setProperty("--bc-bg-alpha", String(state.bgOpacity / 100));
+  if (state.textColor === "auto") {
+    box.style.color = "";
+  } else {
+    box.style.color = state.textColor;
+  }
+}
+
+function applyNativeCaptionVisibility() {
+  const shouldHide = state.enabled && state.hideNativeCaptions;
+  document.documentElement.classList.toggle("better-captions-hide-native", shouldHide);
 }
 
 function resetRetries() {
@@ -526,6 +539,7 @@ async function runCaptionSync() {
     createToggleButton();
 
     const box = createCaptionBox();
+    applyNativeCaptionVisibility();
 
     if (!state.enabled) {
       box.style.display = "none";
@@ -556,9 +570,6 @@ async function runCaptionSync() {
 
       if (captions && captions.length > 0) {
         const normalized = normalizeCaptions(captions);
-        if (state.hideNativeCaptions) {
-          setNativeCaptionsEnabled(false);
-        }
         syncCaptions(video, normalized, box);
         state.captionsActive = true;
         resetRetries();
@@ -568,6 +579,7 @@ async function runCaptionSync() {
 
     console.log("[Better Captions] Using DOM fallback for captions");
     setNativeCaptionsEnabled(true);
+    applyNativeCaptionVisibility();
     const observer = startDomCaptionObserver(box);
     if (!observer) {
       box.innerText = "";
@@ -682,7 +694,9 @@ function initialize() {
       fontSize: DEFAULTS.fontSize,
       bottomOffsetPercent: DEFAULTS.bottomOffsetPercent,
       style: DEFAULTS.style,
-      hideNativeCaptions: DEFAULTS.hideNativeCaptions
+      hideNativeCaptions: DEFAULTS.hideNativeCaptions,
+      bgOpacity: DEFAULTS.bgOpacity,
+      textColor: DEFAULTS.textColor
     },
     prefs => {
       state.enabled = prefs.enabled;
@@ -693,6 +707,8 @@ function initialize() {
       state.bottomOffsetPercent = prefs.bottomOffsetPercent;
       state.style = prefs.style || DEFAULTS.style;
       state.hideNativeCaptions = prefs.hideNativeCaptions ?? DEFAULTS.hideNativeCaptions;
+      state.bgOpacity = prefs.bgOpacity ?? DEFAULTS.bgOpacity;
+      state.textColor = prefs.textColor ?? DEFAULTS.textColor;
       console.log("[Better Captions] Loaded preferences:", prefs);
 
       setupNavigationObserver();
@@ -764,9 +780,19 @@ function initialize() {
 
     if (changes.hideNativeCaptions && changes.hideNativeCaptions.newValue !== undefined) {
       state.hideNativeCaptions = changes.hideNativeCaptions.newValue;
-      if (state.enabled && state.hideNativeCaptions) {
-        setNativeCaptionsEnabled(false);
-      }
+      applyNativeCaptionVisibility();
+    }
+
+    if (changes.bgOpacity && changes.bgOpacity.newValue !== undefined) {
+      state.bgOpacity = changes.bgOpacity.newValue;
+      const box = document.getElementById("custom-caption-box");
+      if (box) applyCaptionBoxPreferences(box);
+    }
+
+    if (changes.textColor && changes.textColor.newValue !== undefined) {
+      state.textColor = changes.textColor.newValue;
+      const box = document.getElementById("custom-caption-box");
+      if (box) applyCaptionBoxPreferences(box);
     }
 
     if (needsRestart && state.enabled) {

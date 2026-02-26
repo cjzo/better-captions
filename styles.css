@@ -13,6 +13,13 @@
   word-wrap: break-word;
   padding: 6px 12px;
   line-height: 1.3;
+  --bc-bg-alpha: 0.45;
+}
+
+.better-captions-hide-native .ytp-caption-window-container,
+.better-captions-hide-native .ytp-caption-segment,
+.better-captions-hide-native .caption-window {
+  display: none !important;
 }
 
 #custom-caption-box[data-style="classic-yellow"] {
@@ -35,7 +42,7 @@
   text-shadow:
     0 1px 2px rgba(0, 0, 0, 0.8),
     0 3px 12px rgba(0, 0, 0, 0.4);
-  background: rgba(10, 10, 10, 0.45);
+  background: rgba(10, 10, 10, var(--bc-bg-alpha));
   border: 1px solid rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -45,7 +52,7 @@
 #custom-caption-box[data-style="cinema"] {
   color: #f7f7f7;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, var(--bc-bg-alpha));
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   letter-spacing: 0.4px;
@@ -54,7 +61,7 @@
 #custom-caption-box[data-style="minimal"] {
   color: #ffffff;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, calc(var(--bc-bg-alpha) * 0.25));
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
 }
@@ -65,9 +72,38 @@
     0 0 6px rgba(82, 226, 255, 0.9),
     0 0 14px rgba(82, 226, 255, 0.6),
     0 2px 12px rgba(0, 0, 0, 0.7);
-  background: rgba(4, 13, 20, 0.5);
+  background: rgba(4, 13, 20, var(--bc-bg-alpha));
   border: 1px solid rgba(120, 230, 255, 0.2);
   border-radius: 14px;
+}
+
+#custom-caption-box[data-style="subtitle-bar"] {
+  color: #fefefe;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  background: rgba(0, 0, 0, calc(var(--bc-bg-alpha) + 0.15));
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: none;
+  border-right: none;
+  border-radius: 0;
+  width: 100%;
+  max-width: none;
+  left: 0;
+  transform: none;
+}
+
+#custom-caption-box[data-style="outline"] {
+  color: #ffffff;
+  text-shadow:
+    -2px -2px 0 #000,
+     2px -2px 0 #000,
+    -2px  2px 0 #000,
+     2px  2px 0 #000,
+     0  0 8px rgba(0, 0, 0, 0.8);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
 }
 
 #better-captions-toggle {
@@ -106,6 +142,10 @@
   #custom-caption-box {
     max-width: 96%;
     font-size: 22px;
+  }
+
+  #custom-caption-box[data-style="subtitle-bar"] {
+    font-size: 20px;
   }
 
   #better-captions-toggle {

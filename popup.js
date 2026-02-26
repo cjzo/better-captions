@@ -9,6 +9,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const bottomOffsetValue = document.getElementById('bottom_offset_value');
   const style = document.getElementById('style');
   const hideNative = document.getElementById('hide_native');
+  const bgOpacity = document.getElementById('bg_opacity');
+  const bgOpacityValue = document.getElementById('bg_opacity_value');
+  const textColor = document.getElementById('text_color');
 
   const DEFAULTS = {
     enabled: true,
@@ -18,7 +21,9 @@ document.addEventListener('DOMContentLoaded', () => {
     fontSize: 28,
     bottomOffsetPercent: 10,
     style: 'glass',
-    hideNativeCaptions: true
+    hideNativeCaptions: true,
+    bgOpacity: 45,
+    textColor: 'auto'
   };
 
   const updateFontSizeLabel = value => {
@@ -27,6 +32,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const updateBottomOffsetLabel = value => {
     bottomOffsetValue.textContent = `${value}%`;
+  };
+
+  const updateBgOpacityLabel = value => {
+    bgOpacityValue.textContent = `${value}%`;
   };
 
   chrome.storage.sync.get(DEFAULTS, prefs => {
@@ -38,9 +47,12 @@ document.addEventListener('DOMContentLoaded', () => {
     bottomOffset.value = prefs.bottomOffsetPercent;
     style.value = prefs.style || DEFAULTS.style;
     hideNative.checked = prefs.hideNativeCaptions ?? DEFAULTS.hideNativeCaptions;
+    bgOpacity.value = prefs.bgOpacity ?? DEFAULTS.bgOpacity;
+    textColor.value = prefs.textColor ?? DEFAULTS.textColor;
 
     updateFontSizeLabel(prefs.fontSize);
     updateBottomOffsetLabel(prefs.bottomOffsetPercent);
+    updateBgOpacityLabel(prefs.bgOpacity ?? DEFAULTS.bgOpacity);
   });
 
   toggle.addEventListener('change', () => {
@@ -77,5 +89,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const value = Number(bottomOffset.value);
     updateBottomOffsetLabel(value);
     chrome.storage.sync.set({ bottomOffsetPercent: value });
+  });
+
+  bgOpacity.addEventListener('input', () => {
+    const value = Number(bgOpacity.value);
+    updateBgOpacityLabel(value);
+    chrome.storage.sync.set({ bgOpacity: value });
+  });
+
+  textColor.addEventListener('change', () => {
+    chrome.storage.sync.set({ textColor: textColor.value });
   });
 });
