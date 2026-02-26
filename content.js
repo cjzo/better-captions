@@ -21,7 +21,10 @@ const state = {
   currentTrackUrl: null,
   runId: 0,
   captionsCache: new Map(),
-  navDebounceId: null
+  navDebounceId: null,
+  retryCount: 0,
+  retryTimerId: null,
+  ccToggleAttempted: false
 };
 
 function waitForVideoAndPlayerResponse(timeoutMs = 12000) {
@@ -78,6 +81,18 @@ function getPlayerData() {
               console.log("[Better Captions] Failed to parse from script tag");
             }
           }
+        }
+      }
+    }
+
+    if (!playerData && window.ytcfg && typeof window.ytcfg.get === "function") {
+      const cfg = window.ytcfg.get("PLAYER_CONFIG") || window.ytcfg.get("PLAYER_VARS");
+      const playerResponse = cfg?.args?.player_response || cfg?.player_response;
+      if (playerResponse) {
+        try {
+          playerData = typeof playerResponse === "string" ? JSON.parse(playerResponse) : playerResponse;
+        } catch (e) {
+          console.log("[Better Captions] Failed to parse from ytcfg");
         }
       }
     }
@@ -241,6 +256,39 @@ async function fetchCaptions(url) {
   }
 }
 
+function buildCaptionUrlVariants(url) {
+  const variants = [];
+  if (!url) return variants;
+
+  const hasFmt = url.includes("fmt=");
+  if (!hasFmt) {
+    variants.push(url + "&fmt=json3");
+    variants.push(url + "&fmt=srv3");
+    variants.push(url + "&fmt=vtt");
+    return variants;
+  }
+
+  variants.push(url);
+
+  const swapFmt = newFmt => url.replace(/fmt=[^&]+/i, "fmt=" + newFmt);
+  variants.push(swapFmt("json3"));
+  variants.push(swapFmt("srv3"));
+  variants.push(swapFmt("vtt"));
+
+  return Array.from(new Set(variants));
+}
+
+async function fetchCaptionsWithFallback(trackUrl) {
+  const variants = buildCaptionUrlVariants(trackUrl);
+  for (const url of variants) {
+    const captions = await fetchCaptions(url);
+    if (captions && captions.length > 0) {
+      return captions;
+    }
+  }
+  return [];
+}
+
 function createCaptionBox() {
   let box = document.getElementById("custom-caption-box");
   if (box) return box;
@@ -261,6 +309,47 @@ function createCaptionBox() {
 function applyCaptionBoxPreferences(box) {
   box.style.fontSize = `${state.fontSize}px`;
   box.style.bottom = `${state.bottomOffsetPercent}%`;
+}
+
+function resetRetries() {
+  state.retryCount = 0;
+  if (state.retryTimerId) {
+    clearTimeout(state.retryTimerId);
+    state.retryTimerId = null;
+  }
+}
+
+function scheduleRetry(reason) {
+  const maxRetries = 3;
+  if (state.retryCount >= maxRetries) return;
+
+  const delays = [2000, 5000, 10000];
+  const delay = delays[Math.min(state.retryCount, delays.length - 1)];
+  state.retryCount += 1;
+
+  console.log(`[Better Captions] Retry scheduled (${state.retryCount}/${maxRetries}): ${reason}`);
+
+  if (state.retryTimerId) {
+    clearTimeout(state.retryTimerId);
+  }
+
+  state.retryTimerId = setTimeout(() => {
+    runCaptionSync();
+  }, delay);
+}
+
+function ensureNativeCaptionsEnabled() {
+  if (state.ccToggleAttempted) return;
+  state.ccToggleAttempted = true;
+
+  const ccButton = document.querySelector(".ytp-subtitles-button");
+  if (ccButton) {
+    const pressed = ccButton.getAttribute("aria-pressed");
+    if (pressed === "false") {
+      ccButton.click();
+      console.log("[Better Captions] Toggled native captions on");
+    }
+  }
 }
 
 function cleanupCaptionLoop() {
@@ -379,6 +468,7 @@ async function runCaptionSync() {
 
   try {
     cleanupCaptionLoop();
+    state.ccToggleAttempted = false;
 
     createToggleButton();
 
@@ -405,7 +495,7 @@ async function runCaptionSync() {
       let captions = state.captionsCache.get(cacheKey);
 
       if (!captions) {
-        captions = await fetchCaptions(trackUrl);
+        captions = await fetchCaptionsWithFallback(trackUrl);
         state.captionsCache.set(cacheKey, captions);
       }
 
@@ -414,19 +504,25 @@ async function runCaptionSync() {
       if (captions && captions.length > 0) {
         syncCaptions(video, captions, box);
         state.captionsActive = true;
+        resetRetries();
         return;
       }
     }
 
     console.log("[Better Captions] Using DOM fallback for captions");
+    ensureNativeCaptionsEnabled();
     const observer = startDomCaptionObserver(box);
     if (!observer) {
       box.innerText = "";
+      scheduleRetry("No caption container found");
+    } else if (!box.innerText) {
+      scheduleRetry("Caption container empty");
     }
 
     state.captionsActive = true;
   } catch (e) {
     console.error("[Better Captions] Failed:", e);
+    scheduleRetry("Exception during sync");
   }
 }
 
@@ -459,6 +555,7 @@ function clearCaptionSystem() {
   if (box) box.innerText = "";
 
   state.captionsActive = false;
+  resetRetries();
 }
 
 let lastUrl = location.href;
@@ -480,6 +577,7 @@ function handleNavigationChange() {
 
     lastUrl = newUrl;
     clearCaptionSystem();
+    resetRetries();
 
     if (state.forceRefresh && oldVideoId && newVideoId && oldVideoId !== newVideoId) {
       console.log("[Better Captions] Forcing page refresh for new video");
@@ -601,6 +699,12 @@ function initialize() {
       runCaptionSync();
     }
   });
+
+  const video = document.querySelector("video");
+  if (video) {
+    video.addEventListener("loadedmetadata", () => runCaptionSync(), { passive: true });
+    video.addEventListener("emptied", () => clearCaptionSystem(), { passive: true });
+  }
 }
 
 if (document.readyState === "loading") {
